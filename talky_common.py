@@ -32,7 +32,8 @@ CONNECTIONS = [
 
 
 def create_landmarker(num_hands=1):
-    """Buat HandLandmarker (mode VIDEO). Model diunduh otomatis jika belum ada."""
+    """Buat HandLandmarker (mode VIDEO). Model diunduh otomatis jika belum ada.
+    num_hands=1 untuk skrip huruf (A-Z), num_hands=2 untuk deteksi dua tangan."""
     if not os.path.exists(MODEL_PATH):
         print("Mengunduh model hand_landmarker.task ...")
         urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
@@ -52,6 +53,7 @@ def detect(landmarker, frame_bgr, timestamp_ms):
     Deteksi tangan pada satu frame (BGR).
     Return: (pts, handedness) atau (None, None) jika tidak ada tangan.
     pts = array (21, 3) berisi x, y, z mentah dari MediaPipe.
+    Hanya mengambil SATU tangan (yang pertama). Untuk dua tangan pakai detect_all().
     """
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -62,6 +64,24 @@ def detect(landmarker, frame_bgr, timestamp_ms):
                    dtype=np.float32)
     handed = result.handedness[0][0].category_name if result.handedness else "?"
     return pts, handed
+
+
+def detect_all(landmarker, frame_bgr, timestamp_ms):
+    """
+    Seperti detect(), tetapi mengembalikan SEMUA tangan yang terdeteksi.
+    Buat landmarker dengan create_landmarker(num_hands=2) agar dua tangan terbaca.
+    Return: list of (pts, handedness). List kosong jika tidak ada tangan.
+    pts = array (21, 3) mentah dari MediaPipe (belum dinormalisasi).
+    """
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+    result = landmarker.detect_for_video(mp_image, timestamp_ms)
+    tangan = []
+    for i, lm in enumerate(result.hand_landmarks):
+        pts = np.array([[p.x, p.y, p.z] for p in lm], dtype=np.float32)
+        handed = result.handedness[i][0].category_name if result.handedness else "?"
+        tangan.append((pts, handed))
+    return tangan
 
 
 def normalize(pts):

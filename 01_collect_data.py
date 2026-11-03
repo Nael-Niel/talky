@@ -22,7 +22,7 @@ CSV_PATH = os.path.join(DATA_DIR, "dataset.csv")
 HEADER = ["person_id", "label", "handedness"] + FEATURE_COLUMNS
 
 LETTERS = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
-TARGET = 400          # target sampel per huruf
+TARGET = 100          # target sampel per huruf
 INTERVAL = 0.10       # jeda antar sampel (detik) saat perekaman otomatis
 FLUSH_EVERY = 20      # tulis ke file setiap sekian sampel
 
@@ -41,7 +41,7 @@ if not file_baru:
         reader = csv.reader(f)
         next(reader, None)  # lewati header
         for row in reader:
-            if len(row) > 1 and row[1] in counts:
+            if len(row) > 1 and row[0] == person_id and row[1] in counts:
                 counts[row[1]] += 1
     print(f"Melanjutkan dataset yang ada: {sum(counts.values())} sampel.")
 
