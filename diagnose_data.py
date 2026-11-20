@@ -10,8 +10,11 @@ Ide utama: untuk setiap sampel dihitung "ekstensi jari" =
 Kalau huruf A (kepalan) ternyata punya banyak baris bernilai besar,
 berarti ada pose terbuka yang ikut terekam sebagai A.
 
-Jalankan: python diagnose_data.py
+Jalankan:
+  python diagnose_data.py
+  python diagnose_data.py data\\dataset_luar_sibi1.csv
 """
+import argparse
 import os
 
 import numpy as np
@@ -21,15 +24,25 @@ from sklearn.neighbors import KNeighborsClassifier
 
 from talky_common import FEATURE_COLUMNS, FOLDER
 
-CSV_PATH = os.path.join(FOLDER, "data", "dataset.csv")
+DEFAULT_CSV = os.path.join(FOLDER, "data", "dataset.csv")
 UJUNG = [8, 12, 16, 20]   # ujung telunjuk, tengah, manis, kelingking
 PANGKAL = [5, 9, 13, 17]  # pangkal keempat jari itu
 
+parser = argparse.ArgumentParser(description="Diagnosis pose dan keterpisahan huruf di CSV")
+parser.add_argument("file", nargs="?", default=DEFAULT_CSV,
+                    help="Path file CSV (bawaan: data/dataset.csv)")
+args = parser.parse_args()
+CSV_PATH = args.file
+
 if not os.path.exists(CSV_PATH):
-    print("File data/dataset.csv belum ada.")
-    raise SystemExit
+    print(f"File tidak ditemukan: {CSV_PATH}")
+    raise SystemExit(1)
 
 df = pd.read_csv(CSV_PATH)
+if len(df) == 0:
+    print(f"File CSV kosong: {CSV_PATH}")
+    raise SystemExit(1)
+print(f"File: {CSV_PATH}")
 pts = df[FEATURE_COLUMNS].to_numpy(dtype=float).reshape(-1, 21, 3)
 
 # Pergelangan sudah (0,0,0) setelah normalisasi, jadi jarak = norma titik

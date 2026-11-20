@@ -2,4 +2,5 @@ venv/
 __pycache__/
 *.py[cod]
 data/*.csv
+data_luar/
 repomix-output.xml

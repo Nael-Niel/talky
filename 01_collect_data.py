@@ -21,8 +21,8 @@ DATA_DIR = os.path.join(FOLDER, "data")
 CSV_PATH = os.path.join(DATA_DIR, "dataset.csv")
 HEADER = ["person_id", "label", "handedness"] + FEATURE_COLUMNS
 
-LETTERS = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
-TARGET = 100          # target sampel per huruf
+LETTERS = [chr(c) for c in range(ord("A"), ord("Z") + 1) if chr(c) not in ("J", "Z")]
+TARGET = 100          # target sampel per huruf (24 huruf statis A-Y tanpa J, Z)
 INTERVAL = 0.10       # jeda antar sampel (detik) saat perekaman otomatis
 FLUSH_EVERY = 20      # tulis ke file setiap sekian sampel
 
@@ -112,9 +112,9 @@ try:
             put(frame, "Tidak ada tangan", (10, 56), (0, 0, 255))
 
         h = frame.shape[0]
-        put(frame, "Huruf=pilih  SPASI=rekam/jeda  ESC=keluar", (10, h - 80), scale=0.5)
-        for i in range(3):  # tiga baris ringkasan jumlah sampel
-            potong = LETTERS[i * 9:(i + 1) * 9]
+        put(frame, "Huruf=pilih (A-Y tanpa J,Z)  SPASI=rekam/jeda  ESC=keluar", (10, h - 80), scale=0.5)
+        for i in range(3):  # tiga baris ringkasan 24 huruf (8 huruf per baris)
+            potong = LETTERS[i * 8:(i + 1) * 8]
             teks = " ".join(f"{c}:{counts[c]}" for c in potong)
             put(frame, teks, (10, h - 55 + i * 20), (200, 255, 200), 0.5)
 
@@ -127,8 +127,15 @@ try:
             if active:
                 recording = not recording
         elif 65 <= key <= 90 or 97 <= key <= 122:
-            active = chr(key).upper()
-            recording = False
+            pilihan = chr(key).upper()
+            if pilihan in ("J", "Z"):
+                print(f"[INFO] Huruf '{pilihan}' adalah huruf dinamis (gerakan).")
+                print("       Huruf J dan Z dideteksi via gerak_jz.py, tidak dimasukkan ke dataset.csv.")
+                active = None
+                recording = False
+            else:
+                active = pilihan
+                recording = False
 finally:
     flush()
     cap.release()

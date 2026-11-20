@@ -1,109 +1,120 @@
 """
-talky_common.py
-Fungsi bersama untuk semua skrip Talky (rekam data, tes real-time, dll).
-PENTING: normalize() harus SAMA di training dan di aplikasi mobile.
+test_gerak_jz.py
+Pengujian mandiri modul deteksi huruf bergerak J dan Z (gerak_jz.py).
+Skrip ini TIDAK membutuhkan model training atau file data/dataset.csv.
+
+Mekanisme:
+  - Menggunakan Google MediaPipe Tasks API untuk membaca 21 titik tangan.
+  - Melacak ujung kelingking (titik 20) untuk huruf J (gerak lengkung kail).
+  - Melacak ujung telunjuk (titik 8) untuk huruf Z (gerak zig-zag).
+  - Menggambar jejak lintasan ujung jari dengan garis kuning secara real-time.
+
+Kontrol Keyboard:
+  - ESC / Q : Keluar dari program
+  - M       : Balik arah sumbu X (flip_x toggle, jika arah kamera berlawanan)
+  - C       : Bersihkan jejak lintasan saat ini
 """
+
 import os
-import urllib.request
+import sys
+import time
 
 import cv2
 import numpy as np
-import mediapipe as mp
-from mediapipe.tasks import python as mp_python
-from mediapipe.tasks.python import vision
 
-FOLDER = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(FOLDER, "hand_landmarker.task")
-MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/"
-             "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task")
-
-# Nama kolom fitur: x0,y0,z0,x1,y1,z1,...,x20,y20,z20 (63 kolom)
-FEATURE_COLUMNS = [f"{axis}{i}" for i in range(21) for axis in "xyz"]
-
-# Pasangan titik yang dihubungkan untuk menggambar kerangka tangan
-CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),
-    (0, 5), (5, 6), (6, 7), (7, 8),
-    (5, 9), (9, 10), (10, 11), (11, 12),
-    (9, 13), (13, 14), (14, 15), (15, 16),
-    (13, 17), (17, 18), (18, 19), (19, 20),
-    (0, 17),
-]
+from talky_common import create_landmarker, detect, draw_hand
+from gerak_jz import JZDetector
 
 
-def create_landmarker(num_hands=1):
-    """Buat HandLandmarker (mode VIDEO). Model diunduh otomatis jika belum ada.
-    num_hands=1 untuk skrip huruf (A-Z), num_hands=2 untuk deteksi dua tangan."""
-    if not os.path.exists(MODEL_PATH):
-        print("Mengunduh model hand_landmarker.task ...")
-        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-        print("Selesai.")
-    with open(MODEL_PATH, "rb") as f:
-        model_bytes = f.read()
-    options = vision.HandLandmarkerOptions(
-        base_options=mp_python.BaseOptions(model_asset_buffer=model_bytes),
-        running_mode=vision.RunningMode.VIDEO,
-        num_hands=num_hands,
-    )
-    return vision.HandLandmarker.create_from_options(options)
+def put_text(frame, text, pos, color=(255, 255, 255), scale=0.6, tebal=2):
+    cv2.putText(frame, text, pos, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), tebal + 2)
+    cv2.putText(frame, text, pos, cv2.FONT_HERSHEY_SIMPLEX, scale, color, tebal)
 
 
-def detect(landmarker, frame_bgr, timestamp_ms):
-    """
-    Deteksi tangan pada satu frame (BGR).
-    Return: (pts, handedness) atau (None, None) jika tidak ada tangan.
-    pts = array (21, 3) berisi x, y, z mentah dari MediaPipe.
-    Hanya mengambil SATU tangan (yang pertama). Untuk dua tangan pakai detect_all().
-    """
-    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-    result = landmarker.detect_for_video(mp_image, timestamp_ms)
-    if not result.hand_landmarks:
-        return None, None
-    pts = np.array([[p.x, p.y, p.z] for p in result.hand_landmarks[0]],
-                   dtype=np.float32)
-    handed = result.handedness[0][0].category_name if result.handedness else "?"
-    return pts, handed
+def main():
+    print("=" * 60)
+    print("TALKY - PENGUJIAN MANDIRI DETEKSI HURUF J DAN Z")
+    print("=" * 60)
+    print("Petunjuk gerakan:")
+    print("  - Huruf J: Angkat hanya jari kelingking, gerakkan melengkung ke bawah lalu naik.")
+    print("  - Huruf Z: Angkat hanya jari telunjuk, gerakkan zig-zag (kanan -> serong kiri -> kanan).")
+    print("Kontrol: Tekan ESC atau Q untuk keluar | Tekan M untuk toggle mirror X\n")
+
+    landmarker = create_landmarker(num_hands=1)
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(1)
+    if not cap.isOpened():
+        print("[ERROR] Kamera tidak dapat diakses.")
+        return
+
+    jz = JZDetector(flip_x=False)
+    t0 = time.time()
+    last_detected = None
+    last_detect_time = 0.0
+    DISPLAY_DURATION = 2.0  # Durasi huruf hasil deteksi tampil di layar (detik)
+
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+
+            # Frame di-flip cermin agar konsisten dengan standar Talky
+            frame = cv2.flip(frame, 1)
+            h, w = frame.shape[:2]
+            now = time.time()
+            timestamp_ms = int((now - t0) * 1000)
+
+            pts, handed = detect(landmarker, frame, timestamp_ms)
+
+            if pts is not None:
+                draw_hand(frame, pts)
+                hasil = jz.update(pts, w, h, now=now)
+                if hasil:
+                    last_detected = hasil
+                    last_detect_time = now
+                    print(f"[{time.strftime('%H:%M:%S')}] Terdeteksi Huruf Dinamis: {hasil}")
+
+            # Gambar lintasan garis kuning jejak jari
+            jz.draw(frame)
+
+            # Tampilan Status & UI
+            put_text(frame, f"Deteksi Gerak J & Z (Mirror X: {jz.flip_x})", (10, 30), (0, 255, 255), 0.7)
+
+            if pts is not None:
+                pose_aktif = jz.pose
+                pose_str = f"Pose Jari: {pose_aktif}" if pose_aktif else "Pose: Bukan J/Z"
+                put_text(frame, f"Tangan: {handed} | {pose_str}", (10, 60), (200, 200, 200), 0.5)
+            else:
+                put_text(frame, "Arahkan satu tangan ke kamera", (10, 60), (0, 0, 255), 0.5)
+
+            # Menampilkan huruf yang berhasil dikenali
+            if last_detected and (now - last_detect_time < DISPLAY_DURATION):
+                warna = (0, 255, 0)
+                teks_hasil = f"TERDETEKSI: HURUF {last_detected}!"
+                cv2.putText(frame, teks_hasil, (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 5)
+                cv2.putText(frame, teks_hasil, (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1.0, warna, 2)
+
+            put_text(frame, "ESC/Q = Keluar  |  M = Balik Arah X  |  C = Hapus Jejak", (10, h - 20), (220, 220, 220), 0.5)
+
+            cv2.imshow("Talky - Tes Gerak J & Z", frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key in (27, ord('q'), ord('Q')):
+                break
+            elif key in (ord('m'), ord('M')):
+                jz.flip_x = not jz.flip_x
+                print(f"[INFO] Mirror X diubah menjadi: {jz.flip_x}")
+            elif key in (ord('c'), ord('C')):
+                for tr in jz.trails.values():
+                    tr.clear()
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        landmarker.close()
+        print("\nPengujian selesai.")
 
 
-def detect_all(landmarker, frame_bgr, timestamp_ms):
-    """
-    Seperti detect(), tetapi mengembalikan SEMUA tangan yang terdeteksi.
-    Buat landmarker dengan create_landmarker(num_hands=2) agar dua tangan terbaca.
-    Return: list of (pts, handedness). List kosong jika tidak ada tangan.
-    pts = array (21, 3) mentah dari MediaPipe (belum dinormalisasi).
-    """
-    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-    result = landmarker.detect_for_video(mp_image, timestamp_ms)
-    tangan = []
-    for i, lm in enumerate(result.hand_landmarks):
-        pts = np.array([[p.x, p.y, p.z] for p in lm], dtype=np.float32)
-        handed = result.handedness[i][0].category_name if result.handedness else "?"
-        tangan.append((pts, handed))
-    return tangan
-
-
-def normalize(pts):
-    """
-    pts: array (21, 3) mentah dari MediaPipe.
-    1) Translasi: pergelangan tangan (titik 0) menjadi titik asal (0,0,0).
-    2) Skala: bagi dengan jarak terjauh, sehingga ukuran tangan tidak berpengaruh.
-    Return: array 63 nilai, atau None jika data tidak valid.
-    """
-    pts = np.asarray(pts, dtype=np.float32)
-    pts = pts - pts[0]
-    scale = np.max(np.linalg.norm(pts, axis=1))
-    if scale < 1e-6:
-        return None
-    return (pts / scale).flatten()
-
-
-def draw_hand(frame, pts):
-    """Gambar kerangka tangan di frame. pts: array (21, 3) mentah (0-1)."""
-    h, w = frame.shape[:2]
-    xy = [(int(p[0] * w), int(p[1] * h)) for p in pts]
-    for a, b in CONNECTIONS:
-        cv2.line(frame, xy[a], xy[b], (255, 255, 255), 2)
-    for x, y in xy:
-        cv2.circle(frame, (x, y), 4, (0, 255, 0), -1)
+if __name__ == "__main__":
+    main()
